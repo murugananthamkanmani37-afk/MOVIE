@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>{{ chatbot_name }}</title>
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --panel: #ffffff;
+    --ink: #1f2a24;
+    --muted: #6b7a72;
+    --accent: #2f6f4f;
+    --accent-dark: #24573e;
+    --bubble-user: #2f6f4f;
+    --bubble-bot: #eef1ec;
+    --border: #dfe3dd;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: "Georgia", "Iowan Old Style", serif;
+    background: var(--bg);
+    color: var(--ink);
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 32px 16px;
+  }
+
+  .app {
+    width: 100%;
+    max-width: 640px;
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 64px);
+  }
+
+  header {
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+
+  header h1 {
+    font-size: 1.6rem;
+    margin: 0 0 4px 0;
+    letter-spacing: 0.2px;
+  }
+
+  header p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  #chat-window {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .message {
+    max-width: 82%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    line-height: 1.5;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 0.97rem;
+    white-space: pre-wrap;
+  }
+
+  .message.user {
+    align-self: flex-end;
+    background: var(--bubble-user);
+    color: #fff;
+    border-bottom-right-radius: 3px;
+  }
+
+  .message.bot {
+    align-self: flex-start;
+    background: var(--bubble-bot);
+    color: var(--ink);
+    border-bottom-left-radius: 3px;
+  }
+
+  .message.error {
+    align-self: flex-start;
+    background: #fbe7e5;
+    color: #8a2f24;
+  }
+
+  .message.typing {
+    align-self: flex-start;
+    background: var(--bubble-bot);
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  form#chat-form {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  #user-input {
+    flex: 1;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 1rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    resize: none;
+  }
+
+  #user-input:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  button#send-btn {
+    padding: 0 20px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  button#send-btn:hover {
+    background: var(--accent-dark);
+  }
+
+  button#send-btn:disabled {
+    background: var(--muted);
+    cursor: not-allowed;
+  }
+
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-top: 10px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>{{ chatbot_name }}</h1>
+      <p>Ask me anything about your studies — homework, concepts, or exam prep. I only answer study-related questions.</p>
+    </header>
+
+    <div id="chat-window"></div>
+
+    <form id="chat-form">
+      <textarea
+        id="user-input"
+        rows="1"
+        placeholder="Ask a study-related question..."
+        required
+      ></textarea>
+      <button type="submit" id="send-btn">Send</button>
+    </form>
+
+    <footer>Powered by Gemini</footer>
+  </div>
+
+<script>
+  const chatWindow = document.getElementById("chat-window");
+  const chatForm = document.getElementById("chat-form");
+  const userInput = document.getElementById("user-input");
+  const sendBtn = document.getElementById("send-btn");
+
+  // Keeps track of the conversation so far, sent to the backend on
+  // every request so Gemini has context of previous turns.
+  let history = [];
+
+  function addMessage(text, role) {
+    const bubble = document.createElement("div");
+    bubble.className = "message " + role;
+    bubble.textContent = text;
+    chatWindow.appendChild(bubble);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+    return bubble;
+  }
+
+  function setLoading(isLoading) {
+    sendBtn.disabled = isLoading;
+    userInput.disabled = isLoading;
+  }
+
+  chatForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const message = userInput.value.trim();
+    if (!message) return;
+
+    addMessage(message, "user");
+    history.push({ role: "user", text: message });
+    userInput.value = "";
+    setLoading(true);
+
+    const typingBubble = addMessage("Thinking...", "typing");
+
+    try {
+      const response = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, history }),
+      });
+
+      const data = await response.json();
+      typingBubble.remove();
+
+      if (!response.ok || data.error) {
+        addMessage(data.error || "Something went wrong.", "error");
+      } else {
+        addMessage(data.reply, "bot");
+        history.push({ role: "bot", text: data.reply });
+      }
+    } catch (err) {
+      typingBubble.remove();
+      addMessage("Network error. Please try again.", "error");
+    } finally {
+      setLoading(false);
+      userInput.focus();
+    }
+  });
+
+  // Allow Enter to send, Shift+Enter for a new line.
+  userInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      chatForm.requestSubmit();
+    }
+  });
+</script>
+</body>
+</html>
